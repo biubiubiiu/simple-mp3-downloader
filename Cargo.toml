@@ -17,6 +17,15 @@ url = "2.5"
 rfd = "0.17.2"
 futures = "0.3.32"
 regex = "1.12.3"
+image = "0.25"
 
 [dev-dependencies]
 mockito = "1.5"
+
+[package.metadata.bundle]
+name = "SimpleMP3Downloader"
+identifier = "p.raymond.mp3downloader"
+icon = ["assets/icon.png", "assets/icon.icns"]
+version = "0.1.0"
+copyright = "Copyright © 2026"
+category = "Utility"
