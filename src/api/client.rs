@@ -177,11 +177,78 @@ impl ApiClient {
 
         Ok((convert_response.title, file_data))
     }
+
+    /// Get download info (title, url) without downloading
+    pub async fn get_download_info(&self, video_id: &str) -> Result<(String, String)> {
+        // Step 1: Get convert URL
+        let convert_url = self.init().await?;
+
+        // Step 2 & 3: Convert and get download URL
+        let convert_response = self.convert(&convert_url, video_id).await?;
+
+        if convert_response.download_url.is_empty() {
+            return Err(ApiError::NoDownloadUrl);
+        }
+
+        Ok((convert_response.title, convert_response.download_url))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_get_download_info() {
+        let mut server = mockito::Server::new_async().await;
+
+        // Mock init endpoint
+        let init_response = crate::api::models::InitResponse {
+            convert_url: format!("{}/convert?sig=test123", server.url()),
+            error: "0".to_string(),
+        };
+
+        let mock_init = server
+            .mock("GET", mockito::Matcher::Regex("/init.*".to_string()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&serde_json::to_string(&init_response).unwrap())
+            .create_async()
+            .await;
+
+        // Mock convert endpoint
+        let convert_response = crate::api::models::ConvertResponse {
+            error: 0,
+            progress_url: String::new(),
+            download_url: format!("{}/download.mp3", server.url()),
+            redirect_url: String::new(),
+            redirect: 0,
+            title: "Test Song".to_string(),
+        };
+
+        let mock_convert = server
+            .mock("GET", mockito::Matcher::Regex(".*convert.*".to_string()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&serde_json::to_string(&convert_response).unwrap())
+            .create_async()
+            .await;
+
+        let client = ApiClient::new(crate::api::models::ApiConfig {
+            user_id: "test_user".to_string(),
+            base_init_url: server.url(),
+        });
+
+        let result = client.get_download_info("test_video_id").await;
+
+        assert!(result.is_ok());
+        let (title, url) = result.unwrap();
+        assert_eq!(title, "Test Song");
+        assert_eq!(url, format!("{}/download.mp3", server.url()));
+
+        mock_init.assert_async().await;
+        mock_convert.assert_async().await;
+    }
 
     #[tokio::test]
     async fn test_client_new() {
