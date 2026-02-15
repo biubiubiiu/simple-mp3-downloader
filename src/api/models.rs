@@ -27,14 +27,12 @@ pub struct ConvertResponse {
 /// Configuration for the API client
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
-    pub user_id: String,
     pub base_init_url: String,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            user_id: "uLYHx4FToXeloU3RJEEliN".to_string(),
             base_init_url: "https://eta.etacloud.org/api/v1".to_string(),
         }
     }

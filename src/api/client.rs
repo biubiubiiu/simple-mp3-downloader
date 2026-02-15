@@ -41,13 +41,6 @@ impl ApiClient {
         Self { config }
     }
 
-    pub fn with_user_id(user_id: String) -> Self {
-        Self::new(ApiConfig {
-            user_id,
-            ..Default::default()
-        })
-    }
-
     fn extract_json_from_html(&self, html: &str) -> Option<Value> {
         // Matches JSON.parse('...') inside the script tag
         let re = Regex::new(r"JSON\.parse\('([^']+)'\)").ok()?;

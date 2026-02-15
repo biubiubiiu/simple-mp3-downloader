@@ -20,7 +20,7 @@ impl Default for DownloadApp {
 
 impl DownloadApp {
     pub fn new() -> Self {
-        let api_client = ApiClient::with_user_id("uLYHx4FToXeloU3RJEEliN".to_string());
+        let api_client = ApiClient::new(Default::default());
         let view = DownloadView::default();
 
         Self {
