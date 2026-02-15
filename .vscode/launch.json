@@ -1,0 +1,50 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'simple-mp3-downloader'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--package=simple-mp3-downloader",
+                    "--bin=simple-mp3-downloader"
+                ],
+                "filter": {
+                    "name": "simple-mp3-downloader",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=simple-mp3-downloader"
+                ],
+                "filter": {
+                    "name": "simple-mp3-downloader",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo test --no-run"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug (manual build)",
+            "program": "${workspaceFolder}/target/debug/simple-mp3-downloader",
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
