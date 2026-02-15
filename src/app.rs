@@ -1,11 +1,15 @@
 use crate::api::ApiClient;
 use crate::ui::{DownloadMessage, DownloadView};
-use std::path::PathBuf;
+use futures::StreamExt;
 use iced::Task;
+use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
 
 pub struct DownloadApp {
     view: DownloadView,
     api_client: ApiClient,
+    // Store download state for subscription
+    pending_download: Option<(String, PathBuf)>, // (url, save_path)
 }
 
 impl Default for DownloadApp {
@@ -22,6 +26,7 @@ impl DownloadApp {
         Self {
             view,
             api_client,
+            pending_download: None,
         }
     }
 }
@@ -33,8 +38,27 @@ pub enum Message {
     DownloadInfoReceived(Result<(String, String), String>),
     /// (Selected Path, Download URL)
     FileSaveSelected(Option<PathBuf>, String),
+    /// Download progress (0.0 to 1.0)
+    DownloadProgress(f32),
     /// Final result after downloading and saving
     DownloadCompleted(Result<PathBuf, String>),
+}
+
+/// Internal state for the download stream
+enum DownloadState {
+    Start {
+        client: ApiClient,
+        url: String,
+        path: PathBuf,
+    },
+    Downloading {
+        file: tokio::fs::File,
+        stream: futures::stream::BoxStream<'static, crate::api::Result<bytes::Bytes>>,
+        downloaded: u64,
+        total: Option<u64>,
+        path: PathBuf,
+    },
+    Finished,
 }
 
 pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
@@ -53,17 +77,13 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
                             app.view.status_message = format!("Fetching info for: {}", video_id);
 
                             // Step 1: Get download URL and title
+                            // iced Task::perform runs in the background tokio executor
                             return Task::perform(
                                 async move {
-                                    // Run in dedicated thread/runtime to ensure reqwest context
-                                    let result = std::thread::spawn(move || {
-                                        let rt = tokio::runtime::Runtime::new().unwrap();
-                                        rt.block_on(async move {
-                                            api_client.get_download_info(&video_id).await
-                                        })
-                                    }).join().unwrap();
-
-                                    result.map_err(|e| e.to_string())
+                                    api_client
+                                        .get_download_info(&video_id)
+                                        .await
+                                        .map_err(|e| e.to_string())
                                 },
                                 Message::DownloadInfoReceived,
                             );
@@ -79,11 +99,12 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
             match result {
                 Ok((title, url)) => {
                     app.view.status_message = "Please select save location...".to_string();
-                    let sanitized_filename = format!("{}.mp3", 
+                    let sanitized_filename = format!(
+                        "{}.mp3",
                         crate::utils::sanitize_filename(&title)
                             .trim_matches(|c| c == '.' || c == ' ')
                     );
-                    
+
                     // Step 2: Open Save Dialog
                     return Task::perform(
                         async move {
@@ -92,7 +113,7 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
                                 .save_file()
                                 .await
                                 .map(|handle| handle.path().to_path_buf());
-                            
+
                             (path, url)
                         },
                         |(path, url)| Message::FileSaveSelected(path, url),
@@ -108,34 +129,125 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
             match path_opt {
                 Some(path) => {
                     app.view.status_message = format!("Downloading to: {}", path.display());
-                    let api_client = app.api_client.clone();
-                    
-                    // Step 3: Download file to selected path
-                    return Task::perform(
-                        async move {
-                            let url = url.clone();
-                            let path = path.clone();
-                            
-                             // Run in dedicated thread/runtime
-                            let result = std::thread::spawn(move || {
-                                let rt = tokio::runtime::Runtime::new().unwrap();
-                                rt.block_on(async move {
-                                    api_client.download_file(&url).await
-                                })
-                            }).join().unwrap();
+                    app.pending_download = Some((url.clone(), path.clone()));
 
-                            match result {
-                                Ok(data) => {
-                                    match std::fs::write(&path, data) {
-                                        Ok(_) => Ok(path),
-                                        Err(e) => Err(format!("File write error: {}", e)),
+                    let api_client = app.api_client.clone();
+
+                    // Step 3: Start streaming download
+                    return Task::stream(futures::stream::unfold(
+                        DownloadState::Start {
+                            client: api_client,
+                            url,
+                            path,
+                        },
+                        |state| async move {
+                            match state {
+                                DownloadState::Start { client, url, path } => {
+                                    // Create file asynchronously
+                                    let file = match tokio::fs::File::create(&path).await {
+                                        Ok(f) => f,
+                                        Err(e) => {
+                                            return Some((
+                                                Message::DownloadCompleted(Err(format!(
+                                                    "Failed to create file: {}",
+                                                    e
+                                                ))),
+                                                DownloadState::Finished,
+                                            ))
+                                        }
+                                    };
+
+                                    // Request download stream
+                                    match client.download_file_stream(&url).await {
+                                        Ok((total_size, stream)) => Some((
+                                            Message::DownloadProgress(0.0),
+                                            DownloadState::Downloading {
+                                                file,
+                                                stream: stream.boxed(),
+                                                downloaded: 0,
+                                                total: total_size,
+                                                path,
+                                            },
+                                        )),
+                                        Err(e) => Some((
+                                            Message::DownloadCompleted(Err(e.to_string())),
+                                            DownloadState::Finished,
+                                        )),
                                     }
                                 }
-                                Err(e) => Err(e.to_string()),
+                                DownloadState::Downloading {
+                                    mut file,
+                                    mut stream,
+                                    mut downloaded,
+                                    total,
+                                    path,
+                                } => {
+                                    // Get next chunk from stream
+                                    match stream.next().await {
+                                        Some(Ok(chunk)) => {
+                                            // Write chunk to file asynchronously
+                                            if let Err(e) = file.write_all(&chunk).await {
+                                                return Some((
+                                                    Message::DownloadCompleted(Err(format!(
+                                                        "Write error: {}",
+                                                        e
+                                                    ))),
+                                                    DownloadState::Finished,
+                                                ));
+                                            }
+
+                                            downloaded += chunk.len() as u64;
+
+                                            // Calculate progress if total size is known
+                                            let progress = if let Some(t) = total {
+                                                if t > 0 {
+                                                    downloaded as f32 / t as f32
+                                                } else {
+                                                    0.0
+                                                }
+                                            } else {
+                                                0.0
+                                            };
+
+                                            Some((
+                                                Message::DownloadProgress(progress),
+                                                DownloadState::Downloading {
+                                                    file,
+                                                    stream,
+                                                    downloaded,
+                                                    total,
+                                                    path,
+                                                },
+                                            ))
+                                        }
+                                        Some(Err(e)) => Some((
+                                            Message::DownloadCompleted(Err(e.to_string())),
+                                            DownloadState::Finished,
+                                        )),
+                                        None => {
+                                            // Stream finished successfully
+                                            // Flush remaining data to disk
+                                            if let Err(e) = file.sync_all().await {
+                                                return Some((
+                                                    Message::DownloadCompleted(Err(format!(
+                                                        "Failed to sync file: {}",
+                                                        e
+                                                    ))),
+                                                    DownloadState::Finished,
+                                                ));
+                                            }
+
+                                            Some((
+                                                Message::DownloadCompleted(Ok(path)),
+                                                DownloadState::Finished,
+                                            ))
+                                        }
+                                    }
+                                }
+                                DownloadState::Finished => None,
                             }
                         },
-                        Message::DownloadCompleted,
-                    );
+                    ));
                 }
                 None => {
                     // User cancelled dialog
@@ -144,8 +256,18 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
                 }
             }
         }
+        Message::DownloadProgress(progress) => {
+            app.view.download_progress = progress;
+            if progress >= 1.0 {
+                app.view.status_message = "Download complete, finalizing...".to_string();
+            } else {
+                app.view.status_message = format!("Downloading: {:.1}%", progress * 100.0);
+            }
+        }
         Message::DownloadCompleted(result) => {
             app.view.is_downloading = false;
+            app.pending_download = None;
+            app.view.download_progress = 0.0;
             match result {
                 Ok(path) => {
                     app.view.status_message = format!("Saved: {}", path.display());

@@ -31,7 +31,11 @@ pub fn extract_video_id(input: &str) -> Option<String> {
     let input = input.trim();
 
     // If it looks like a raw video ID (11 characters, typical YouTube ID format)
-    if input.len() == 11 && input.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if input.len() == 11
+        && input
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Some(input.to_string());
     }
 
@@ -44,7 +48,10 @@ pub fn extract_video_id(input: &str) -> Option<String> {
 
         // Handle youtube.com watch URLs
         if url.host_str().map_or(false, |h| h.ends_with("youtube.com")) {
-            return url.query_pairs().find(|(k, _)| k == "v").map(|(_, v)| v.to_string());
+            return url
+                .query_pairs()
+                .find(|(k, _)| k == "v")
+                .map(|(_, v)| v.to_string());
         }
     }
 

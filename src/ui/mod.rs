@@ -1,5 +1,5 @@
 use iced::{
-    widget::{button, column, text, text_input, Space},
+    widget::{button, column, progress_bar, text, text_input, Space},
     Element, Length,
 };
 
@@ -8,14 +8,16 @@ pub struct DownloadView {
     pub youtube_url: String,
     pub status_message: String,
     pub is_downloading: bool,
+    pub download_progress: f32,
 }
 
 impl Default for DownloadView {
     fn default() -> Self {
         Self {
             youtube_url: String::new(),
-            status_message: "Enter a video ID to download".to_string(),
+            status_message: "Enter a youtube video url to download".to_string(),
             is_downloading: false,
+            download_progress: 0.0,
         }
     }
 }
@@ -39,7 +41,13 @@ impl DownloadView {
     }
 
     pub fn view(&self) -> Element<'_, DownloadMessage> {
-        column![
+        let progress_bar = if self.is_downloading {
+            Some(progress_bar(0.0..=1.0, self.download_progress))
+        } else {
+            None
+        };
+
+        let mut content = column![
             text("MP3 Downloader").size(32),
             Space::new().height(Length::Fixed(20.0)),
             text("YouTube URL:").size(16),
@@ -48,13 +56,25 @@ impl DownloadView {
                 .padding(10),
             Space::new().height(Length::Fixed(10.0)),
             text(&self.status_message).size(14),
-            Space::new().height(Length::Fixed(20.0)),
+        ];
+
+        // Add progress bar if downloading
+        if let Some(pb) = progress_bar {
+            content = content
+                .push(Space::new().height(Length::Fixed(10.0)))
+                .push(pb);
+        }
+
+        content = content.push(Space::new().height(Length::Fixed(20.0))).push(
             button("Download MP3")
-                .on_press(DownloadMessage::DownloadPressed)
+                .on_press_maybe(if !self.is_downloading {
+                    Some(DownloadMessage::DownloadPressed)
+                } else {
+                    None
+                })
                 .padding([10, 20]),
-        ]
-        .padding(20)
-        .spacing(10)
-        .into()
+        );
+
+        content.padding(20).spacing(10).into()
     }
 }

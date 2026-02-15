@@ -1,5 +1,4 @@
 mod client;
-mod models;
+pub mod models;
 
-pub use client::ApiClient;
-
+pub use client::{ApiClient, Result};
