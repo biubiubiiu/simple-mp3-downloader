@@ -5,7 +5,7 @@ use iced::{
 
 /// Main view state
 pub struct DownloadView {
-    pub video_id: String,
+    pub youtube_url: String,
     pub status_message: String,
     pub is_downloading: bool,
 }
@@ -13,7 +13,7 @@ pub struct DownloadView {
 impl Default for DownloadView {
     fn default() -> Self {
         Self {
-            video_id: String::new(),
+            youtube_url: String::new(),
             status_message: "Enter a video ID to download".to_string(),
             is_downloading: false,
         }
@@ -22,15 +22,15 @@ impl Default for DownloadView {
 
 #[derive(Debug, Clone)]
 pub enum DownloadMessage {
-    VideoIdChanged(String),
+    YoutubeUrlChanged(String),
     DownloadPressed,
 }
 
 impl DownloadView {
     pub fn update(&mut self, message: DownloadMessage) {
         match message {
-            DownloadMessage::VideoIdChanged(id) => {
-                self.video_id = id;
+            DownloadMessage::YoutubeUrlChanged(id) => {
+                self.youtube_url = id;
             }
             DownloadMessage::DownloadPressed => {
                 // Will be handled by the app
@@ -43,8 +43,8 @@ impl DownloadView {
             text("MP3 Downloader").size(32),
             Space::new().height(Length::Fixed(20.0)),
             text("YouTube URL:").size(16),
-            text_input("Enter YouTube URL...", &self.video_id)
-                .on_input(DownloadMessage::VideoIdChanged)
+            text_input("Enter YouTube URL...", &self.youtube_url)
+                .on_input(DownloadMessage::YoutubeUrlChanged)
                 .padding(10),
             Space::new().height(Length::Fixed(10.0)),
             text(&self.status_message).size(14),

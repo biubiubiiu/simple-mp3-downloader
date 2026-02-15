@@ -43,28 +43,35 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
             app.view.update(ui_msg.clone());
 
             if let DownloadMessage::DownloadPressed = ui_msg {
-                if !app.view.video_id.is_empty() && !app.view.is_downloading {
-                    let video_id = app.view.video_id.clone();
-                    let api_client = app.api_client.clone();
+                if !app.view.youtube_url.is_empty() && !app.view.is_downloading {
+                    // Extract video ID from URL
+                    match crate::utils::extract_video_id(&app.view.youtube_url) {
+                        Some(video_id) => {
+                            let api_client = app.api_client.clone();
 
-                    app.view.is_downloading = true;
-                    app.view.status_message = format!("Fetching info for: {}", video_id);
+                            app.view.is_downloading = true;
+                            app.view.status_message = format!("Fetching info for: {}", video_id);
 
-                    // Step 1: Get download URL and title
-                    return Task::perform(
-                        async move {
-                            // Run in dedicated thread/runtime to ensure reqwest context
-                            let result = std::thread::spawn(move || {
-                                let rt = tokio::runtime::Runtime::new().unwrap();
-                                rt.block_on(async move {
-                                    api_client.get_download_info(&video_id).await
-                                })
-                            }).join().unwrap();
+                            // Step 1: Get download URL and title
+                            return Task::perform(
+                                async move {
+                                    // Run in dedicated thread/runtime to ensure reqwest context
+                                    let result = std::thread::spawn(move || {
+                                        let rt = tokio::runtime::Runtime::new().unwrap();
+                                        rt.block_on(async move {
+                                            api_client.get_download_info(&video_id).await
+                                        })
+                                    }).join().unwrap();
 
-                            result.map_err(|e| e.to_string())
-                        },
-                        Message::DownloadInfoReceived,
-                    );
+                                    result.map_err(|e| e.to_string())
+                                },
+                                Message::DownloadInfoReceived,
+                            );
+                        }
+                        None => {
+                            app.view.status_message = "Invalid YouTube URL or video ID".to_string();
+                        }
+                    }
                 }
             }
         }

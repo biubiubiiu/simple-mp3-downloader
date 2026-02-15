@@ -24,15 +24,6 @@ pub struct ConvertResponse {
     pub title: String,
 }
 
-/// Response from the /progress endpoint (for future use)
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ProgressResponse {
-    pub error: i32,
-    pub progress: i32,
-    #[serde(default)]
-    pub title: String,
-}
-
 /// Configuration for the API client
 #[derive(Debug, Clone)]
 pub struct ApiConfig {

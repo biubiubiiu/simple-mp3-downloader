@@ -16,7 +16,7 @@ pub enum ApiError {
     ApiError(String),
 
     #[error("Invalid response format")]
-    InvalidResponse,
+    InvalidResponse(String),
 
     #[error("Download URL not found")]
     NoDownloadUrl,
@@ -31,9 +31,7 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new(config: ApiConfig) -> Self {
-        Self {
-            config,
-        }
+        Self { config }
     }
 
     pub fn with_user_id(user_id: String) -> Self {
@@ -58,17 +56,14 @@ impl ApiClient {
             .header("Origin", ORIGIN)
             .header("Referer", REFERER)
             .send()
-            .await?;
+            .await?
+            .error_for_status()
+            .map_err(|e| ApiError::ApiError(format!("Init request failed: {}", e)))?;
 
-        // Check HTTP status before parsing JSON
-        if !response.status().is_success() {
-            return Err(ApiError::ApiError(format!(
-                "HTTP {}: Init request failed",
-                response.status()
-            )));
-        }
-
-        let json: InitResponse = response.json().await?;
+        let json: InitResponse = response
+            .json()
+            .await
+            .map_err(|e| ApiError::InvalidResponse(format!("JSON decode error: {}", e)))?;
 
         if json.error != "0" {
             return Err(ApiError::ApiError(json.error));
@@ -81,10 +76,7 @@ impl ApiClient {
     /// Returns the final response with download URL
     pub async fn convert(&self, convert_url: &str, video_id: &str) -> Result<ConvertResponse> {
         let timestamp = get_timestamp();
-        let convert_url = format!(
-            "{}&v={}&f=mp3&t={}",
-            convert_url, video_id, timestamp
-        );
+        let convert_url = format!("{}&v={}&f=mp3&t={}", convert_url, video_id, timestamp);
 
         let client = Client::new();
         // First call to convert endpoint
@@ -93,17 +85,14 @@ impl ApiClient {
             .header("Origin", ORIGIN)
             .header("Referer", REFERER)
             .send()
-            .await?;
+            .await?
+            .error_for_status()
+            .map_err(|e| ApiError::ApiError(format!("Convert request failed: {}", e)))?;
 
-        // Check HTTP status before parsing JSON
-        if !response.status().is_success() {
-            return Err(ApiError::ApiError(format!(
-                "HTTP {}: Convert request failed",
-                response.status()
-            )));
-        }
-
-        let json: ConvertResponse = response.json().await?;
+        let json: ConvertResponse = response
+            .json()
+            .await
+            .map_err(|e| ApiError::InvalidResponse(format!("JSON decode error: {}", e)))?;
 
         if json.error != 0 {
             return Err(ApiError::ApiError(format!("Error code: {}", json.error)));
@@ -120,17 +109,14 @@ impl ApiClient {
                 .header("Origin", ORIGIN)
                 .header("Referer", REFERER)
                 .send()
-                .await?;
+                .await?
+                .error_for_status()
+                .map_err(|e| ApiError::ApiError(format!("Redirect request failed: {}", e)))?;
 
-            // Check HTTP status before parsing JSON
-            if !response.status().is_success() {
-                return Err(ApiError::ApiError(format!(
-                    "HTTP {}: Redirect request failed",
-                    response.status()
-                )));
-            }
-
-            let json: ConvertResponse = response.json().await?;
+            let json: ConvertResponse = response
+                .json()
+                .await
+                .map_err(|e| ApiError::InvalidResponse(format!("JSON decode error: {}", e)))?;
 
             if json.error != 0 {
                 return Err(ApiError::ApiError(format!("Error code: {}", json.error)));
@@ -148,34 +134,11 @@ impl ApiClient {
         let response = client
             .get(download_url)
             .send()
-            .await?;
-
-        if !response.status().is_success() {
-            return Err(ApiError::ApiError(format!(
-                "Download failed with status: {}",
-                response.status()
-            )));
-        }
+            .await?
+            .error_for_status()
+            .map_err(|e| ApiError::ApiError(format!("Download request failed: {}", e)))?;
 
         Ok(response.bytes().await?)
-    }
-
-    /// Complete workflow: init -> convert -> download
-    pub async fn download_mp3(&self, video_id: &str) -> Result<(String, bytes::Bytes)> {
-        // Step 1: Get convert URL
-        let convert_url = self.init().await?;
-
-        // Step 2 & 3: Convert and get download URL
-        let convert_response = self.convert(&convert_url, video_id).await?;
-
-        if convert_response.download_url.is_empty() {
-            return Err(ApiError::NoDownloadUrl);
-        }
-
-        // Step 4: Download the file
-        let file_data = self.download_file(&convert_response.download_url).await?;
-
-        Ok((convert_response.title, file_data))
     }
 
     /// Get download info (title, url) without downloading
