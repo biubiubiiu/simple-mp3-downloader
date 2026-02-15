@@ -1,5 +1,6 @@
 use crate::api::ApiClient;
 use crate::ui::{DownloadMessage, DownloadView};
+use crate::utils::extract_video_id;
 use std::path::PathBuf;
 use iced::Task;
 
@@ -41,7 +42,17 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
 
             if let DownloadMessage::DownloadPressed = ui_msg {
                 if !app.view.video_id.is_empty() && !app.view.is_downloading {
-                    let video_id = app.view.video_id.clone();
+                    let input = app.view.video_id.clone();
+
+                    // Try to extract video ID from URL or use input directly
+                    let video_id = match extract_video_id(&input) {
+                        Some(id) => id,
+                        None => {
+                            app.view.status_message = "Invalid YouTube URL or video ID".to_string();
+                            return Task::none();
+                        }
+                    };
+
                     let api_client = app.api_client.clone();
 
                     app.view.is_downloading = true;
@@ -51,7 +62,7 @@ pub fn update(app: &mut DownloadApp, message: Message) -> Task<Message> {
                         async move {
                             let video_id = video_id.clone();
                             let api_client = api_client.clone();
-                            
+
                             // Create a new runtime for the blocking task to ensure reqwest has a reactor context
                             // This is necessary because Iced's default executor might not provide the tokio context reqwest expects
                             let result = std::thread::spawn(move || {

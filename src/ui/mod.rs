@@ -42,8 +42,8 @@ impl DownloadView {
         column![
             text("MP3 Downloader").size(32),
             Space::new().height(Length::Fixed(20.0)),
-            text("Video ID:").size(16),
-            text_input("Enter video ID...", &self.video_id)
+            text("YouTube URL:").size(16),
+            text_input("Enter YouTube URL...", &self.video_id)
                 .on_input(DownloadMessage::VideoIdChanged)
                 .padding(10),
             Space::new().height(Length::Fixed(10.0)),
