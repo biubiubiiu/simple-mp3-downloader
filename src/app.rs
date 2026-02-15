@@ -7,7 +7,7 @@ type DownloadResult = Result<(String, Vec<u8>), String>;
 
 pub struct DownloadApp {
     view: DownloadView,
-    api_client: Arc<Mutex<ApiClient>>,
+    api_client: ApiClient,
 }
 
 impl Default for DownloadApp {
@@ -23,7 +23,7 @@ impl DownloadApp {
 
         Self {
             view,
-            api_client: Arc::new(Mutex::new(api_client)),
+            api_client,
         }
     }
 }

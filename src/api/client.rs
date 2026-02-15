@@ -24,15 +24,14 @@ pub enum ApiError {
 
 pub type Result<T> = std::result::Result<T, ApiError>;
 
+#[derive(Clone)]
 pub struct ApiClient {
-    client: Client,
     config: ApiConfig,
 }
 
 impl ApiClient {
     pub fn new(config: ApiConfig) -> Self {
         Self {
-            client: Client::new(),
             config,
         }
     }
@@ -53,10 +52,9 @@ impl ApiClient {
             self.config.base_init_url, self.config.user_id, timestamp
         );
 
-        let response = self
-            .client
+        let client = Client::new();
+        let response = client
             .get(&url)
-            // .header("User-Agent", USER_AGENT)
             .header("Origin", ORIGIN)
             .header("Referer", REFERER)
             .send()
@@ -88,11 +86,10 @@ impl ApiClient {
             convert_url, video_id, timestamp
         );
 
+        let client = Client::new();
         // First call to convert endpoint
-        let response = self
-            .client
+        let response = client
             .get(&convert_url)
-            // .header("User-Agent", USER_AGENT)
             .header("Origin", ORIGIN)
             .header("Referer", REFERER)
             .send()
@@ -118,10 +115,8 @@ impl ApiClient {
             let timestamp = get_timestamp();
             let redirect_url = format!("{}&t={}", json.redirect_url, timestamp);
 
-            let response = self
-                .client
+            let response = client
                 .get(&redirect_url)
-                // .header("User-Agent", USER_AGENT)
                 .header("Origin", ORIGIN)
                 .header("Referer", REFERER)
                 .send()
@@ -149,10 +144,9 @@ impl ApiClient {
 
     /// Step 4: Download the MP3 file
     pub async fn download_file(&self, download_url: &str) -> Result<bytes::Bytes> {
-        let response = self
-            .client
+        let client = Client::new();
+        let response = client
             .get(download_url)
-            // .header("User-Agent", USER_AGENT)
             .send()
             .await?;
 
