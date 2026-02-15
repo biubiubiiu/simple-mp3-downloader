@@ -1,7 +1,9 @@
 use crate::utils::get_timestamp;
 use futures::Stream;
 use futures::TryStreamExt;
+use regex::Regex;
 use reqwest::Client;
+use serde_json::Value;
 use thiserror::Error;
 
 use super::models::{ApiConfig, ConvertResponse, InitResponse};
@@ -22,6 +24,9 @@ pub enum ApiError {
 
     #[error("Download URL not found")]
     NoDownloadUrl,
+
+    #[error("Failed to extract auth data from page")]
+    AuthExtractionError,
 }
 
 pub type Result<T> = std::result::Result<T, ApiError>;
@@ -43,16 +48,71 @@ impl ApiClient {
         })
     }
 
+    fn extract_json_from_html(&self, html: &str) -> Option<Value> {
+        // Matches JSON.parse('...') inside the script tag
+        let re = Regex::new(r"JSON\.parse\('([^']+)'\)").ok()?;
+        if let Some(caps) = re.captures(html) {
+            let json_str = &caps[1];
+            return serde_json::from_str(json_str).ok();
+        }
+        None
+    }
+
+    fn calculate_authorization(&self, json: &Value) -> Option<(String, String)> {
+        let j0 = json[0].as_array()?;
+        let j1 = json[1].as_i64().unwrap_or(0);
+        let j2 = json[2].as_array()?;
+
+        let mut e = String::new();
+        let j2_len = j2.len();
+
+        for t in 0..j0.len() {
+            let val0 = j0[t].as_i64()?;
+            let val2 = j2[j2_len - (t + 1)].as_i64()?;
+            let char_code = (val0 - val2) as u8;
+            e.push(char_code as char);
+        }
+
+        if j1 != 0 {
+            e = e.chars().rev().collect();
+        }
+
+        if e.len() > 32 {
+            e.truncate(32);
+        }
+
+        // Get param name from json[6]
+        let param_name = json[6]
+            .as_u64()
+            .map(|n| (n as u8) as char)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "u".to_string());
+
+        Some((param_name, e))
+    }
+
     /// Step 1: Initialize the conversion process
     /// Returns the convert URL with signature
     pub async fn init(&self) -> Result<String> {
+        let client = Client::new();
+
+        // 1. Fetch the main page to get the auth JSON
+        let html = client.get(ORIGIN).send().await?.text().await?;
+
+        // 2. Extract and calculate auth
+        let json_val = self
+            .extract_json_from_html(&html)
+            .ok_or(ApiError::AuthExtractionError)?;
+        let (param_name, auth_token) = self
+            .calculate_authorization(&json_val)
+            .ok_or(ApiError::AuthExtractionError)?;
+
         let timestamp = get_timestamp();
         let url = format!(
-            "{}/init?u={}&t={}",
-            self.config.base_init_url, self.config.user_id, timestamp
+            "{}/init?{}={}&t={}",
+            self.config.base_init_url, param_name, auth_token, timestamp
         );
 
-        let client = Client::new();
         let response = client
             .get(&url)
             .header("Origin", ORIGIN)
@@ -167,5 +227,48 @@ impl ApiClient {
         }
 
         Ok((convert_response.title, convert_response.download_url))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_json() {
+        let client = ApiClient::new(ApiConfig::default());
+        let html = r#"var json = JSON.parse('[[94,118,116,80,77,82,93,66,85,115,110,104,93,123,96,70,57,131,82,95,78,131],1,[14,2,6,10,11,5,0,12,12,5,3,2,4,0,15,11,8,8,11,8,13,16],1,9,3,117]');"#;
+        let json = client.extract_json_from_html(html).unwrap();
+        assert!(json.is_array());
+        assert_eq!(json[6].as_u64().unwrap(), 117);
+    }
+
+    #[test]
+    fn test_calculate_authorization() {
+        let client = ApiClient::new(ApiConfig::default());
+        let json_val = json!([
+            [
+                94, 118, 116, 80, 77, 82, 93, 66, 85, 115, 110, 104, 93, 123, 96, 70, 57, 131, 82,
+                95, 78, 131
+            ],
+            1,
+            [14, 2, 6, 10, 11, 5, 0, 12, 12, 5, 3, 2, 4, 0, 15, 11, 8, 8, 11, 8, 13, 16],
+            1,
+            9,
+            3,
+            117
+        ]);
+        let (param, auth) = client.calculate_authorization(&json_val).unwrap();
+        assert_eq!(param, "u");
+        // Manual calculation check:
+        // t=0: 94-16 = 78 (N)
+        // t=1: 118-13 = 105 (i)
+        // t=2: 116-8 = 108 (l)
+        // ...
+        // and reverse because json[1] is 1
+        assert_eq!(auth.len(), 22);
+        assert!(auth.ends_with("N")); // Reversed, so N is at the end
+        assert_eq!(auth, "uLYHx4FToXeloU3RJEEliN")
     }
 }

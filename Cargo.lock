@@ -3226,6 +3226,7 @@ dependencies = [
  "futures",
  "iced",
  "mockito",
+ "regex",
  "reqwest",
  "rfd",
  "serde",
