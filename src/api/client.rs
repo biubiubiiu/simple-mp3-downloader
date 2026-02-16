@@ -2,14 +2,15 @@ use crate::utils::get_timestamp;
 use futures::Stream;
 use futures::TryStreamExt;
 use regex::Regex;
+use reqwest::header::{HeaderMap, HeaderValue, ORIGIN, REFERER};
 use reqwest::Client;
 use serde_json::Value;
 use thiserror::Error;
 
 use super::models::{ApiConfig, ConvertResponse, InitResponse};
 
-const ORIGIN: &str = "https://v1.y2mate.nu";
-const REFERER: &str = "https://v1.y2mate.nu/";
+const ORIGIN_URL: &str = "https://v1.y2mate.nu";
+const REFERER_URL: &str = "https://v1.y2mate.nu/";
 
 #[derive(Error, Debug)]
 pub enum ApiError {
@@ -34,11 +35,21 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 #[derive(Clone)]
 pub struct ApiClient {
     config: ApiConfig,
+    client: Client,
 }
 
 impl ApiClient {
     pub fn new(config: ApiConfig) -> Self {
-        Self { config }
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, HeaderValue::from_static(ORIGIN_URL));
+        headers.insert(REFERER, HeaderValue::from_static(REFERER_URL));
+
+        let client = Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self { config, client }
     }
 
     fn extract_json_from_html(&self, html: &str) -> Option<Value> {
@@ -87,10 +98,8 @@ impl ApiClient {
     /// Step 1: Initialize the conversion process
     /// Returns the convert URL with signature
     pub async fn init(&self) -> Result<String> {
-        let client = Client::new();
-
         // 1. Fetch the main page to get the auth JSON
-        let html = client.get(ORIGIN).send().await?.text().await?;
+        let html = self.client.get(ORIGIN_URL).send().await?.text().await?;
 
         // 2. Extract and calculate auth
         let json_val = self
@@ -106,10 +115,9 @@ impl ApiClient {
             self.config.base_init_url, param_name, auth_token, timestamp
         );
 
-        let response = client
+        let response = self
+            .client
             .get(&url)
-            .header("Origin", ORIGIN)
-            .header("Referer", REFERER)
             .send()
             .await?
             .error_for_status()
@@ -133,12 +141,10 @@ impl ApiClient {
         let timestamp = get_timestamp();
         let convert_url = format!("{}&v={}&f=mp3&t={}", convert_url, video_id, timestamp);
 
-        let client = Client::new();
         // First call to convert endpoint
-        let response = client
+        let response = self
+            .client
             .get(&convert_url)
-            .header("Origin", ORIGIN)
-            .header("Referer", REFERER)
             .send()
             .await?
             .error_for_status()
@@ -159,10 +165,9 @@ impl ApiClient {
             let timestamp = get_timestamp();
             let redirect_url = format!("{}&t={}", json.redirect_url, timestamp);
 
-            let response = client
+            let response = self
+                .client
                 .get(&redirect_url)
-                .header("Origin", ORIGIN)
-                .header("Referer", REFERER)
                 .send()
                 .await?
                 .error_for_status()
@@ -189,11 +194,9 @@ impl ApiClient {
         &self,
         download_url: &str,
     ) -> Result<(Option<u64>, impl Stream<Item = Result<bytes::Bytes>>)> {
-        let client = Client::new();
-        let response = client
+        let response = self
+            .client
             .get(download_url)
-            .header("Origin", ORIGIN)
-            .header("Referer", REFERER)
             .send()
             .await?
             .error_for_status()
