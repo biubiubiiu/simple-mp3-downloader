@@ -159,9 +159,16 @@ impl ApiClient {
             return Err(ApiError::ApiError(format!("Error code: {}", json.error)));
         }
 
-        // Check if redirect is needed
-        if json.redirect == 1 && !json.redirect_url.is_empty() {
-            // Follow redirect - call the redirect_url
+        // Handle redirects (may require multiple redirects)
+        let mut json = json;
+        let max_redirects = 10;
+        let mut redirect_count = 0;
+
+        while json.redirect == 1 && !json.redirect_url.is_empty() {
+            if redirect_count >= max_redirects {
+                return Err(ApiError::ApiError("Too many redirects".to_string()));
+            }
+
             let timestamp = get_timestamp();
             let redirect_url = format!("{}&t={}", json.redirect_url, timestamp);
 
@@ -173,7 +180,7 @@ impl ApiClient {
                 .error_for_status()
                 .map_err(|e| ApiError::ApiError(format!("Redirect request failed: {}", e)))?;
 
-            let json: ConvertResponse = response
+            json = response
                 .json()
                 .await
                 .map_err(|e| ApiError::InvalidResponse(format!("JSON decode error: {}", e)))?;
@@ -182,10 +189,10 @@ impl ApiClient {
                 return Err(ApiError::ApiError(format!("Error code: {}", json.error)));
             }
 
-            Ok(json)
-        } else {
-            Ok(json)
+            redirect_count += 1;
         }
+
+        Ok(json)
     }
 
     /// Step 4: Download file with progress stream
