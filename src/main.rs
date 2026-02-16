@@ -1,5 +1,7 @@
 mod api;
 mod app;
+mod application;
+mod domain;
 mod ui;
 mod utils;
 
@@ -17,7 +19,7 @@ fn main() -> iced::Result {
         Err(_) => None,
     };
 
-    iced::application(|| app::DownloadApp::default(), app::update, app::view)
+    iced::application(app::DownloadApp::default, app::update, app::view)
         .title("Simple MP3 Downloader")
         .window(window::Settings {
             icon,
